@@ -1,4 +1,4 @@
-import java.awt.Graphics2D;
+﻿import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
@@ -54,7 +54,7 @@ public class TumblrDownloader {
     //Parameters containing paths
     private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
     private static final File CONTENT_FOLDER = new File("c:\\Pictures\\Baby\\Tumblr Backup");
-    private static final String HIGH_RES_IMAGE_FOLDER = "c:\\Pictures\\Baby";
+    private static final String HIGH_RES_IMAGE_FOLDER = "\\\\DESKTOP-S10BC94\\Users\\mkorby\\Pictures\\Riley";
 
     /**
 	 * Properties file
