@@ -6,6 +6,7 @@ import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -30,12 +31,21 @@ import java.util.Properties;
 import java.util.TreeMap;
 
 import javax.imageio.ImageIO;
+import javax.mail.Message;
+import javax.mail.MessagingException;
+import javax.mail.Session;
+import javax.mail.Transport;
+import javax.mail.internet.AddressException;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.filefilter.WildcardFileFilter;
 import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.DateUtils;
+import org.jasypt.encryption.pbe.StandardPBEStringEncryptor;
+import org.jasypt.properties.EncryptableProperties;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
@@ -59,8 +69,13 @@ public class TumblrDownloader {
     /**
 	 * Properties file
 	 */
-	private static final String TUMBLR_PROPERTIES = "C:\\Google Drive\\Code\\TumblrDownloadr\\tumblr.properties";
+	private static final String TUMBLR_PROPERTIES = "C:\\Users\\mkorby\\Google Drive\\Code\\TumblrDownloadr\\tumblr.properties";
 	private static final String OATH_KEY = "oath.key";
+	
+	/**
+	 * Properties file
+	 */
+	private static final String EMAIL_PROPERTIES = "C:\\users\\mkorby\\Google Drive\\Code\\urinal\\urinal.properties";
 
     //Tumblr settings
 
@@ -101,10 +116,21 @@ public class TumblrDownloader {
     private final HashMap<String,String> _highResImages = new HashMap<String, String>();
     private final Statistics _stats = new Statistics();
     private TreeMap<Date,File> _videosByDate = new TreeMap<Date, File>();
+    
+	static Properties mailServerProperties;
+	static Session getMailSession;
+	static MimeMessage generateMailMessage;
+	private static final String USERNAME = "mkorby";
+	private static final String MY_EMAIL_ADDRESS = "mkorby@gmail.com";
 
     public TumblrDownloader() throws Exception {
         //Find out where we should end the download
-        final Collection<File> downloadPassFiles = FileUtils.listFiles(CONTENT_FOLDER, new WildcardFileFilter(DOWNLOAD_PASS_PREFIX + "*." + INFO_EXTENSION), null);
+        final Collection<File> downloadPassFiles;
+        try {
+        	downloadPassFiles = FileUtils.listFiles(CONTENT_FOLDER, new WildcardFileFilter(DOWNLOAD_PASS_PREFIX + "*." + INFO_EXTENSION), null);
+        } catch (IllegalArgumentException ie) {
+        	throw new RuntimeException("Looks like " + CONTENT_FOLDER + " is not reachable from this computer. Running on the wrong machine?", ie);
+        }
         File newestFile = null;
         for (final File downloadPassFile : downloadPassFiles) {
             if (newestFile == null || FileUtils.isFileNewer(downloadPassFile, newestFile)) {
@@ -114,7 +140,12 @@ public class TumblrDownloader {
         
         //Get the OAuth Key
         final Properties properties = new Properties();
-        final InputStream fileInputStream = new FileInputStream(TUMBLR_PROPERTIES);
+        final InputStream fileInputStream;
+        try {
+        	fileInputStream = new FileInputStream(TUMBLR_PROPERTIES);
+        } catch (FileNotFoundException ie) {
+        	throw new RuntimeException("Cannot reach the properties file on Google Drive. Maybe not connected to Google Drive?", ie);
+        }
         properties.load(fileInputStream);
         final String oauthKey = properties.getProperty(OATH_KEY);
 
@@ -833,14 +864,81 @@ public class TumblrDownloader {
         }
         return result;
     }
+    
+    /**
+	 * This method pulls back the password that we need to log in to the
+	 * Followme site from a properites file in which it is stored encrypted
+	 * 
+	 * In order to re-encrypt the password, you'll need the Jasypt command line
+	 * tools More info here: http://www.jasypt.org/cli.html
+	 * 
+	 * @return
+	 * @throws FileNotFoundException
+	 * @throws IOException
+	 */
+	private static String getPasswordFromEncryptedFile(final String paramsKey)
+			throws FileNotFoundException, IOException {
+		/*
+		 * First, create (or ask some other component for) the adequate
+		 * encryptor for decrypting the values in our .properties file.
+		 */
+		final StandardPBEStringEncryptor encryptor = new StandardPBEStringEncryptor();
+		encryptor.setPassword("encryptionToken");
+
+		/*
+		 * Create our EncryptableProperties object and load it the usual way.
+		 */
+
+		final Properties props = new EncryptableProperties(encryptor);
+		props.load(new FileInputStream(EMAIL_PROPERTIES));
+
+		/*
+		 * To get a non-encrypted value, we just get it with getProperty...
+		 */
+
+		final String password = props.getProperty(paramsKey);
+		return password;
+	}
+	
+	public static void generateAndSendEmail(final String password, final String message)
+			throws AddressException, MessagingException {
+		mailServerProperties = System.getProperties();
+		mailServerProperties.put("mail.smtp.port", "587"); // TLS Port
+		mailServerProperties.put("mail.smtp.auth", "true"); // Enable
+															// Authentication
+		mailServerProperties.put("mail.smtp.starttls.enable", "true"); // Enable
+																		// StartTLS
+		getMailSession = Session.getDefaultInstance(mailServerProperties, null);
+		generateMailMessage = new MimeMessage(getMailSession);
+		generateMailMessage.addRecipient(Message.RecipientType.TO, new InternetAddress(MY_EMAIL_ADDRESS));
+		generateMailMessage.setSubject("Tumblr Downloadr Failed");
+		final String emailBody = "An error occured while running the Tumblr Downloadr on " + new Date() + ":<br>"
+				+ message;
+		generateMailMessage.setContent(emailBody, "text/html");
+		final Transport transport = getMailSession.getTransport("smtp");
+		// Enter your correct gmail UserID and Password
+		transport.connect("smtp.gmail.com", USERNAME, password);
+		transport.sendMessage(generateMailMessage, generateMailMessage.getAllRecipients());
+		transport.close();
+	}
+
 
     public static void main(final String... args) {
+    	String mailPassword = null;
         try {
+        	mailPassword = getPasswordFromEncryptedFile("mailer.password");
             new TumblrDownloader();
-        } catch (Exception e) {
-            e.printStackTrace();
-            System.exit(1);
-        }
+        } catch (final Throwable ie) {
+			// Let's send an email about this
+			if (mailPassword != null) {
+				try {
+					generateAndSendEmail(mailPassword, ie.toString());
+				} catch (final MessagingException e1) {
+					e1.printStackTrace();
+				}
+			}
+			ie.printStackTrace();
+		}
     }
 
 }
