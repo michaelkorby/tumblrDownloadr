@@ -59,12 +59,14 @@ import org.jsoup.Jsoup;
 public class TumblrDownloader {
 
 
+	private static final String LINK_TYPE = "link";
+
 	private static final int RETRY_ATTEMPT_COUNT = 25;
 
     //Parameters containing paths
     private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
     private static final File CONTENT_FOLDER = new File("c:\\Pictures\\Baby\\Tumblr Backup");
-    private static final String HIGH_RES_IMAGE_FOLDER = "\\\\DESKTOP-S10BC94\\Users\\mkorby\\Pictures\\Riley";
+    private static final String HIGH_RES_IMAGE_FOLDER = "C:\\Users\\mkorby\\Google Drive\\Riley Tumblr Staging";
 
     /**
 	 * Properties file
@@ -159,6 +161,7 @@ public class TumblrDownloader {
         //Go through and downlaod all the posts that we're going to need to process
         final LinkedList<JSONObject> allPostsWeNeedToDownload = new LinkedList<JSONObject>();
 
+        int retryCount = 0;
         for (int offset = 0; gotten == WINDOW && !done; offset += gotten) {
             final JSONObject response = getRequest(TUMBLR_BLOG_URL, oauthKey, offset);
             final JSONArray posts;
@@ -169,8 +172,14 @@ public class TumblrDownloader {
                 //Since gotten has been added to the offset for this iteration, let's subtract it to re-do this offset.
                 System.err.println("NPE caught when trying to read JSON results. Rertying.");
                 offset -= gotten;
-                continue;
+                if (++retryCount < 10) {
+                	continue;
+                } else {
+                	fileInputStream.close();
+                	throw new RuntimeException("Cannot connect to tumblr.com. Tried 10 times. Quitting");
+                }
             }
+            retryCount = 0;
             gotten = posts.size();
 
             //Go through all the posts
@@ -238,9 +247,11 @@ public class TumblrDownloader {
                 //Quote post has a text tag
                 processText(postObj, postDate, tags, "text");
             } else if (AUDIO_TYPE.equals(postType)) {
-            	//Audtio
+            	//Audio
             	processVideoOrAudio(postObj, postDate, tags, false);
-            	
+            } else if (LINK_TYPE.equals(postType)) {
+            	//Link
+            	processLink(postObj, postDate, tags);
             } else {
             	throw new RuntimeException("Encountered unknown post type " + postType + ". Unable to process. Halting processing.");
             }
@@ -260,7 +271,15 @@ public class TumblrDownloader {
         _stats.dump();
     }
 
-    /**
+    /*
+     * Process link post
+     */
+    private void processLink(JSONObject postObj, Date postDate, String tags) throws IOException {
+    	//Skipping links!
+		
+	}
+
+	/**
      * Process a text post
      * @param postObj
      * @param postDate
@@ -437,7 +456,11 @@ public class TumblrDownloader {
      */
     private void hashHighResImagesIfNeeded() throws Exception {
         if (_highResImages.isEmpty()) {
-            for (final File file : getAllFilesByExtension(HIGH_RES_IMAGE_FOLDER, JPG, PNG)) {
+            File[] allFiles = getAllFilesByExtension(HIGH_RES_IMAGE_FOLDER, JPG, PNG);
+            if (allFiles == null) {
+            	throw new RuntimeException("No high res image folder found: "+ HIGH_RES_IMAGE_FOLDER);
+            }
+			for (final File file : allFiles) {
                 String compareToHash = null;
                 //The image might need to be rotated first. Let's get the orientation from EXIF
                 final JobResults jobResults = new JobResults(EXIF_TOOL, "-S", "-Orientation", file.getAbsolutePath()).invoke();
