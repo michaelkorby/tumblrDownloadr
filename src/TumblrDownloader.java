@@ -59,6 +59,8 @@ import org.jsoup.Jsoup;
 public class TumblrDownloader {
 
 
+	private static final String DATA_NPF = "data-npf='";
+
 	private static final String LINK_TYPE = "link";
 
 	private static final int RETRY_ATTEMPT_COUNT = 25;
@@ -66,6 +68,7 @@ public class TumblrDownloader {
     //Parameters containing paths
     private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
     private static final File CONTENT_FOLDER = new File("c:\\Pictures\\Baby\\Tumblr Backup");
+//    private static final File CONTENT_FOLDER = new File("p:\\Baby\\Tumblr Backup");
     private static final String HIGH_RES_IMAGE_FOLDER = "C:\\Users\\mkorby\\Google Drive\\Riley Tumblr Staging";
 
     /**
@@ -196,18 +199,17 @@ public class TumblrDownloader {
                     break;
                 }
 
+                //UNCOMMENT WHEN DONE
                 allPostsWeNeedToDownload.add(postObj);
 
 
                 //If you want to drill in on just one post, use this code in place of the above
-                /*
-                if (postID == 70745845116l) {
-
-                    allPostsWeNeedToDownload.add(postObj);
-                    done = true;
-                    break;
-                }
-                  */
+//                System.out.println(postID);
+//                                if (postID == 617750062949400576l) {
+//                
+//                                    allPostsWeNeedToDownload.add(postObj);
+//                                }
+                  
             }
         }
 
@@ -231,8 +233,13 @@ public class TumblrDownloader {
             final String dateTimeString = (String)postObj.get("date");
             final Date postDate = TUMBLR_DATE_FORMAT.parse(dateTimeString);
 
-            final String postType = (String) postObj.get("type");
+            String postType = (String) postObj.get("type");
             final String tags = getTags(postObj);
+            
+            //For some reason, text posts can be either text posts or video posts. Determine which it is:
+            if (TEXT_TYPE.equals(postType) &&  ((String)postObj.get("body")).indexOf(DATA_NPF) > -1) {
+            	postType = VIDEO_TYPE;
+            }
 
             if (PHOTO_TYPE.equals(postType)) {
                 //This is a photo
@@ -327,7 +334,11 @@ public class TumblrDownloader {
         	final String embedUrlParameter = video ? "video_url" : "audio_url";
 
             String embedUrl = (String)postObject.get(embedUrlParameter);
-
+            
+            //There is a whole separate pattern for videos that are listed as text posts
+            if (embedUrl == null) {
+            	embedUrl = getEmbedUrlFromDataNpfTag(postObject);
+            }
             
 
             if (!video) {
@@ -406,8 +417,27 @@ public class TumblrDownloader {
     }
 
 
+/**
+ * Get the embedUrl for videos from the body tag of the data-npf style
+ * @param postObject
+ * @return
+ */
+    private String getEmbedUrlFromDataNpfTag(final JSONObject postObject) {
+		String body = (String)postObject.get("body");
+		final int startIndex = body.indexOf(DATA_NPF);
+		if (startIndex > -1) {
+			//This is the proper format
+			int endStart = startIndex + DATA_NPF.length();
+			final int endIndex = body.indexOf("'",endStart);
+			String dataNpfJson = body.substring(endStart, endIndex);
+			final JSONObject dataNpfObj = (JSONObject) JSONValue.parse(dataNpfJson);
+			return (String)dataNpfObj.get("url");
+			
+		}
+		return null;
+	}
 
-    private void updateFileTimestamp(final Date postTimestamp, final File file) {
+	private void updateFileTimestamp(final Date postTimestamp, final File file) {
         if (postTimestamp != null) {
             file.setLastModified(postTimestamp.getTime());
         }
@@ -417,7 +447,7 @@ public class TumblrDownloader {
     }
 
     private String getAndStripCaption(final JSONObject postObject) {
-        return stripCaption(getStringProperty(postObject, "caption"));
+        return stripCaption(getStringProperty(postObject, "summary"));
     }
 
     /**
