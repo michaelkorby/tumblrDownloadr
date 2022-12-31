@@ -43,9 +43,18 @@ import org.jsoup.Jsoup;
  * Date: 4/12/12
  */
 public class TumblrDownloader {
+	
+	//System-specific path prefixes
+	//LAPTOP
+//	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorb\\My Drive";
+//	private static final String CONTENT_ROOT = "p:\\";
+	
+	//LENOVO
+	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorby\\Google Drive";
+	private static final String CONTENT_ROOT = "c:\\Pictures";
 
 
-	private static final String WGET_EXE = "C:\\Users\\mkorby\\Google Drive\\Code\\TumblrDownloadr\\wget\\wget.exe";
+	private static final String WGET_EXE = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\wget\\wget.exe";
 
 	private static final String DATA_NPF = "data-npf='";
 
@@ -55,18 +64,17 @@ public class TumblrDownloader {
 
 	//Parameters containing paths
 	private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
-	private static final File CONTENT_FOLDER = new File("c:\\Pictures\\Baby\\Tumblr Backup");
-//	private static final File CONTENT_FOLDER = new File("p:\\Baby\\Tumblr Backup");
-	private static final String HIGH_RES_IMAGE_FOLDER = "C:\\Users\\mkorby\\Google Drive\\Riley Tumblr Staging";
+	private static final File CONTENT_FOLDER = new File(CONTENT_ROOT + "\\Baby\\Tumblr Backup");
+	private static final String HIGH_RES_IMAGE_FOLDER = GOOGLE_DRIVE_ROOT + "\\Riley Tumblr Staging";
 
 	/**
 	 * Properties file
 	 */
-	private static final String TUMBLR_PROPERTIES = "C:\\Users\\mkorby\\Google Drive\\Code\\TumblrDownloadr\\tumblr.properties";
+	private static final String TUMBLR_PROPERTIES = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\tumblr.properties";
 	private static final String OATH_KEY = "oath.key";
 
 	//Tumblr settings
-	private static final String TUMBLR_BLOG_URL = "http://api.tumblr.com/v2/blog/rileykorby.tumblr.com/posts/";
+	private static final String TUMBLR_BLOG_URL = "https://api.tumblr.com/v2/blog/riley-k.tumblr.com/posts/";
 	private static final int HTTP_SUCCESS = 200;
 	private static final int WINDOW = 20;
 	private static final ImagePHash IMAGE_PHASH = new ImagePHash();
@@ -319,9 +327,10 @@ public class TumblrDownloader {
 			//Audio files require a bizarre set of manipulation to the URL to be performed before they can be accessed. The original URL returns a 403.
 
 			//First, we need to strip out the last portion after the slash
-			//Then, stuff it into the following prefix and sufix to make a valid URL. This appears to work, according to https://groups.google.com/forum/#!topic/tumblr-api/xQIPlEtMZ3Q
+			//Then, stuff it into the following prefix and suffix to make a valid URL. This appears to work, according to https://groups.google.com/forum/#!topic/tumblr-api/xQIPlEtMZ3Q
 			embedUrl = "http://a.tumblr.com/" + getFilenameFromUrl(embedUrl) + "o1.mp3";
 		}
+		boolean downloaded = true;
 
 		//Let's see if there's a matching one in the high-res folder. If so, we don't need to bother downloading
 		
@@ -331,7 +340,7 @@ public class TumblrDownloader {
 		if (matchingOriginals.size() == 1 && matchingOriginals.iterator().next().canRead()) {
 			//There is just one match. Great. We should take this file.
 			//Sometimes the next-day matching is a little overzealous and will pick up a file from the next day that's not the right one
-			//it will already have been copied and will dissapear from the original folder, so the 2nd clause is necessary
+			//it will already have been copied and will disappear from the original folder, so the 2nd clause is necessary
 			newFileName = takeOriginalFileOverDownloadedOne(null, matchingOriginals.iterator().next());
 			if (video) {
 				_stats.originalVideosCopied++;
@@ -339,7 +348,7 @@ public class TumblrDownloader {
 				_stats.originalAudioFilesCopied++;
 			}
 
-		} else {
+		} else if (embedUrl != null) {
 			//We cannot definitively identify the original video file in the library. Download it.
 			File downloadedFile = null;
 			for (int i = 0; i <= RETRY_ATTEMPT_COUNT; i++) {
@@ -380,15 +389,21 @@ public class TumblrDownloader {
 			if (!renamedSuccessfully) {
 				throw new RuntimeException("Unable to rename movie file to " + newFileName);
 			}
+		} else {
+			//This is a YouTube video or something else that we can't download. Make a fake filename
+			//to create the associated info file. 
+			newFileName = new File(CONTENT_ROOT, caption+".mov");
+			downloaded = false;
 		}
 
 		createInfoFile(newFileName, "Caption: " + caption, tags, null, postTimestamp);
-		if (video) {
-			_stats.videosDownloaded++; 
-		} else {
-			_stats.audioFilesDownloaded++; 
+		if (downloaded) {
+			if (video) {
+				_stats.videosDownloaded++; 
+			} else {
+				_stats.audioFilesDownloaded++; 
+			}
 		}
-
 	}
 
 
@@ -398,6 +413,12 @@ public class TumblrDownloader {
 	 * @return
 	 */
 	private String getEmbedUrlFromDataNpfTag(final JSONObject postObject) {
+		//First, let's check if this is a YouTube embed. YouTube videos can't be downloaded
+		if (postObject.get("video") instanceof JSONObject && ((JSONObject)postObject.get("video")).get("youtube") != null) {
+			//This is a YouTube video. We can't download it.
+			return null;
+		}
+		
 		String body = (String)postObject.get("body");
 		final int startIndex = body.indexOf(DATA_NPF);
 		if (startIndex > -1) {
