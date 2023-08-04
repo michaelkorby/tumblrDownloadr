@@ -1,4 +1,4 @@
-﻿import java.awt.Graphics2D;
+import java.awt.Graphics2D;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
@@ -36,6 +36,9 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 /**
  * Created by IntelliJ IDEA.
@@ -43,9 +46,18 @@ import org.jsoup.Jsoup;
  * Date: 4/12/12
  */
 public class TumblrDownloader {
+	
+	//System-specific path prefixes
+	//LAPTOP
+//	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorb\\My Drive";
+//	private static final String CONTENT_ROOT = "p:\\";
+	
+	//LENOVO
+	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorby\\Google Drive";
+	private static final String CONTENT_ROOT = "c:\\Pictures";
 
 
-	private static final String WGET_EXE = "C:\\Users\\mkorby\\Google Drive\\Code\\TumblrDownloadr\\wget\\wget.exe";
+	private static final String WGET_EXE = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\wget\\wget.exe";
 
 	private static final String DATA_NPF = "data-npf='";
 
@@ -55,18 +67,17 @@ public class TumblrDownloader {
 
 	//Parameters containing paths
 	private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
-	private static final File CONTENT_FOLDER = new File("c:\\Pictures\\Baby\\Tumblr Backup");
-//	private static final File CONTENT_FOLDER = new File("p:\\Baby\\Tumblr Backup");
-	private static final String HIGH_RES_IMAGE_FOLDER = "C:\\Users\\mkorby\\Google Drive\\Riley Tumblr Staging";
+	private static final File CONTENT_FOLDER = new File(CONTENT_ROOT + "\\Baby\\Tumblr Backup");
+	private static final String HIGH_RES_IMAGE_FOLDER = GOOGLE_DRIVE_ROOT + "\\Riley Tumblr Staging";
 
 	/**
 	 * Properties file
 	 */
-	private static final String TUMBLR_PROPERTIES = "C:\\Users\\mkorby\\Google Drive\\Code\\TumblrDownloadr\\tumblr.properties";
+	private static final String TUMBLR_PROPERTIES = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\tumblr.properties";
 	private static final String OATH_KEY = "oath.key";
 
 	//Tumblr settings
-	private static final String TUMBLR_BLOG_URL = "http://api.tumblr.com/v2/blog/rileykorby.tumblr.com/posts/";
+	private static final String TUMBLR_BLOG_URL = "https://api.tumblr.com/v2/blog/riley-k.tumblr.com/posts/";
 	private static final int HTTP_SUCCESS = 200;
 	private static final int WINDOW = 20;
 	private static final ImagePHash IMAGE_PHASH = new ImagePHash();
@@ -210,14 +221,22 @@ public class TumblrDownloader {
 			String postType = (String) postObj.get("type");
 			final String tags = getTags(postObj);
 
-			//For some reason, text posts can be either text posts or video posts. Determine which it is:
-			if (TEXT_TYPE.equals(postType) &&  ((String)postObj.get("body")).indexOf(DATA_NPF) > -1) {
-				postType = VIDEO_TYPE;
+			//New format (NPF) text posts can be either text posts or video  or audio posts. Determine which it is:
+			boolean npfPost = false;
+			if (TEXT_TYPE.equals(postType)) {
+				String body = (String)postObj.get("body");
+				if (body.indexOf(DATA_NPF) > -1) {
+					postType = VIDEO_TYPE;
+				} else if (body.indexOf("src") > -1) {
+					//NPF image posts contain an "src" element. There's got to be a better way to identify them...
+					postType = PHOTO_TYPE;
+					npfPost = true;
+				}
 			}
-
+			
 			if (PHOTO_TYPE.equals(postType)) {
 				//This is a photo
-				processPhoto(postObj, postDate, tags);
+				processPhoto(postObj, postDate, tags, npfPost);
 			} else if (VIDEO_TYPE.equals(postType)) {
 				//This is a video
 				processVideoOrAudio(postObj, postDate, tags, true);
@@ -319,9 +338,10 @@ public class TumblrDownloader {
 			//Audio files require a bizarre set of manipulation to the URL to be performed before they can be accessed. The original URL returns a 403.
 
 			//First, we need to strip out the last portion after the slash
-			//Then, stuff it into the following prefix and sufix to make a valid URL. This appears to work, according to https://groups.google.com/forum/#!topic/tumblr-api/xQIPlEtMZ3Q
+			//Then, stuff it into the following prefix and suffix to make a valid URL. This appears to work, according to https://groups.google.com/forum/#!topic/tumblr-api/xQIPlEtMZ3Q
 			embedUrl = "http://a.tumblr.com/" + getFilenameFromUrl(embedUrl) + "o1.mp3";
 		}
+		boolean downloaded = true;
 
 		//Let's see if there's a matching one in the high-res folder. If so, we don't need to bother downloading
 		
@@ -331,7 +351,7 @@ public class TumblrDownloader {
 		if (matchingOriginals.size() == 1 && matchingOriginals.iterator().next().canRead()) {
 			//There is just one match. Great. We should take this file.
 			//Sometimes the next-day matching is a little overzealous and will pick up a file from the next day that's not the right one
-			//it will already have been copied and will dissapear from the original folder, so the 2nd clause is necessary
+			//it will already have been copied and will disappear from the original folder, so the 2nd clause is necessary
 			newFileName = takeOriginalFileOverDownloadedOne(null, matchingOriginals.iterator().next());
 			if (video) {
 				_stats.originalVideosCopied++;
@@ -339,7 +359,7 @@ public class TumblrDownloader {
 				_stats.originalAudioFilesCopied++;
 			}
 
-		} else {
+		} else if (embedUrl != null) {
 			//We cannot definitively identify the original video file in the library. Download it.
 			File downloadedFile = null;
 			for (int i = 0; i <= RETRY_ATTEMPT_COUNT; i++) {
@@ -380,15 +400,21 @@ public class TumblrDownloader {
 			if (!renamedSuccessfully) {
 				throw new RuntimeException("Unable to rename movie file to " + newFileName);
 			}
+		} else {
+			//This is a YouTube video or something else that we can't download. Make a fake filename
+			//to create the associated info file. 
+			newFileName = new File(CONTENT_ROOT, caption+".mov");
+			downloaded = false;
 		}
 
 		createInfoFile(newFileName, "Caption: " + caption, tags, null, postTimestamp);
-		if (video) {
-			_stats.videosDownloaded++; 
-		} else {
-			_stats.audioFilesDownloaded++; 
+		if (downloaded) {
+			if (video) {
+				_stats.videosDownloaded++; 
+			} else {
+				_stats.audioFilesDownloaded++; 
+			}
 		}
-
 	}
 
 
@@ -398,6 +424,12 @@ public class TumblrDownloader {
 	 * @return
 	 */
 	private String getEmbedUrlFromDataNpfTag(final JSONObject postObject) {
+		//First, let's check if this is a YouTube embed. YouTube videos can't be downloaded
+		if (postObject.get("video") instanceof JSONObject && ((JSONObject)postObject.get("video")).get("youtube") != null) {
+			//This is a YouTube video. We can't download it.
+			return null;
+		}
+		
 		String body = (String)postObject.get("body");
 		final int startIndex = body.indexOf(DATA_NPF);
 		if (startIndex > -1) {
@@ -555,18 +587,56 @@ public class TumblrDownloader {
 	/**
 	 * Given a photo object, get it and save it with all of its info
 	 */
-	private void processPhoto(final JSONObject photoPost, final Date postTimestamp, final String tags) throws Exception {
+	private void processPhoto(final JSONObject photoPost, final Date postTimestamp, final String tags, final boolean npfType) throws Exception {
 		hashHighResImagesIfNeeded();
 
 		final String caption = getAndStripCaption(photoPost);
+		LinkedList<File> downloadedFiles = new LinkedList<File>();
+		
+		if (npfType) {
+			//This is a new format post
+			String bodyHTML = (String)photoPost.get("body");
+			Document doc = Jsoup.parse(bodyHTML);
 
-		final JSONArray photos = (JSONArray) photoPost.get("photos");
-		for (final Object photo : photos) {
-			final String individualCaption = stripCaption(getStringProperty(photo, "caption"));
-			final Object originalSize = ((JSONObject) photo).get("original_size");
-			final String photoUrl = getStringProperty(originalSize, "url");
+			// Find all img tags within the HTML. These are the image URLs
+			Elements imgTags = doc.select("img");
 
-			File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+			// Extract the src values for each img tag
+			for (Element imgTag : imgTags) {
+			    String srcValue = imgTag.attr("src");
+			    //The URL in the post object usually lists a 640x960 resolution. Oftentimes, a 1280x1920 version exists, as well. We should try to get it.
+			    String higherRes = srcValue.replace("s640x960", "s1280x1920");
+
+			    //First, we want to try to download the higher res version
+			    File highResFile = downloadHighResFileByFollowingHtmlPage(higherRes, CONTENT_FOLDER );
+			    if (highResFile != null && highResFile.exists()) {
+			    	downloadedFiles.add(highResFile);
+			    } else {
+			    	//If this URL doesn't actually exist, try the lower res one that should
+			    	File downloadedFile = downloadHighResFileByFollowingHtmlPage(srcValue, CONTENT_FOLDER);
+			    	downloadedFiles.add(downloadedFile);
+			    }
+			}
+		} else {
+			//Totally different procedure for original posts
+			final JSONArray photos = (JSONArray) photoPost.get("photos");
+			for (final Object photo : photos) {
+				final Object originalSize = ((JSONObject) photo).get("original_size");
+				final String photoUrl = getStringProperty(originalSize, "url");
+
+				File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+				downloadedFiles.add(downloadedFile);
+			}
+		}
+
+//		final JSONArray photos = (JSONArray) photoPost.get("photos");
+//		for (final Object photo : photos) {
+//			final String individualCaption = stripCaption(getStringProperty(photo, "caption"));
+//			final Object originalSize = ((JSONObject) photo).get("original_size");
+//			final String photoUrl = getStringProperty(originalSize, "url");
+//
+//			File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+		for (final File downloadedFile : downloadedFiles) {
 
 			//Now that we've downloaded the image from tumblr, let's see if there's a high res copy in the originals folder
 			final FileInputStream fileInputStream = new FileInputStream(downloadedFile);
@@ -590,6 +660,7 @@ public class TumblrDownloader {
 
 			//Let's see how far we are from anything in the folder
 			boolean usingHighResImage = false;
+			File usedHighResFile = null;
 			if (minDistance <= MAX_PHASH_DISTANCE && matchingFilenames.size() == 1) {
 				//Anything over this threshold is definitely not a match and if more than 1 images matched then we won't know which to pick
 
@@ -602,7 +673,7 @@ public class TumblrDownloader {
 				}
 				usingHighResImage = true;
 
-				downloadedFile = takeOriginalFileOverDownloadedOne(downloadedFile, highResFile);
+				usedHighResFile = takeOriginalFileOverDownloadedOne(downloadedFile, highResFile);
 				_stats.highResImagesCopied++;
 
 			} else {
@@ -623,17 +694,48 @@ public class TumblrDownloader {
 				}
 			}
 
-			//Annotate the file with the caption
-			final String totalCaption = StringUtils.isBlank(individualCaption) ? caption : individualCaption;
-
-			if (getExtension(downloadedFile.getName()).equals(JPG)) {
+			File fileObj = usedHighResFile == null ? downloadedFile : usedHighResFile;
+			if (getExtension(fileObj.getName()).equals(JPG)) {
 				//Update EXIF only for JPGs. Doesn't work for PNGs.
-				updateExifForJPG(totalCaption, tags, downloadedFile, postTimestamp, usingHighResImage);
+				updateExifForJPG(caption, tags, fileObj, postTimestamp, usingHighResImage);
 			} else {
-				createInfoFile(downloadedFile, totalCaption, tags, null, postTimestamp);
+				createInfoFile(fileObj, caption, tags, null, postTimestamp);
 			}
 			_stats.imagesDownloaded++;
 		}
+	}
+
+	/**
+	 * The way this works is weird.
+	 * 
+	 * The .JPG URL goes to an HTML page that has some decoration around the image. 
+	 * The image URL is inside that page and it's SOMETIMES different than the URL of the page itself.
+	 * Sometimes it's the same, which is bizarre.
+	 * 
+	 * This method takes the URL, goes there, looks up the SRC from an IMG tag of class J9AiF
+	 * ad then downloads that image
+	 * 
+	 * @param url
+	 * @param contentFolder
+	 * @return
+	 * @throws IOException
+	 * @throws InterruptedException 
+	 */
+	private File downloadHighResFileByFollowingHtmlPage(String url, File contentFolder) throws IOException, InterruptedException {
+		// Fetch the HTML content of the page
+        Document doc = Jsoup.connect(url).get();
+
+        // Find all the <img> tags with class "J9Aif" - should be just one
+        Elements imgElements = doc.select("img.J9AiF");
+
+        // Loop through the elements and print their 'src' attribute
+        for (Element imgElement : imgElements) {
+            String srcUrl = imgElement.attr("src");
+            
+            return downloadFile(srcUrl, contentFolder);
+        }
+        
+        return null;
 	}
 
 	private File takeOriginalFileOverDownloadedOne(final File downloadedFile, final File highResFile) throws IOException {
