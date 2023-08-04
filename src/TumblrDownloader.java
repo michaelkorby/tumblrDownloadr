@@ -36,6 +36,9 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 /**
  * Created by IntelliJ IDEA.
@@ -218,14 +221,22 @@ public class TumblrDownloader {
 			String postType = (String) postObj.get("type");
 			final String tags = getTags(postObj);
 
-			//For some reason, text posts can be either text posts or video posts. Determine which it is:
-			if (TEXT_TYPE.equals(postType) &&  ((String)postObj.get("body")).indexOf(DATA_NPF) > -1) {
-				postType = VIDEO_TYPE;
+			//New format (NPF) text posts can be either text posts or video  or audio posts. Determine which it is:
+			boolean npfPost = false;
+			if (TEXT_TYPE.equals(postType)) {
+				String body = (String)postObj.get("body");
+				if (body.indexOf(DATA_NPF) > -1) {
+					postType = VIDEO_TYPE;
+				} else if (body.indexOf("src") > -1) {
+					//NPF image posts contain an "src" element. There's got to be a better way to identify them...
+					postType = PHOTO_TYPE;
+					npfPost = true;
+				}
 			}
-
+			
 			if (PHOTO_TYPE.equals(postType)) {
 				//This is a photo
-				processPhoto(postObj, postDate, tags);
+				processPhoto(postObj, postDate, tags, npfPost);
 			} else if (VIDEO_TYPE.equals(postType)) {
 				//This is a video
 				processVideoOrAudio(postObj, postDate, tags, true);
@@ -576,18 +587,56 @@ public class TumblrDownloader {
 	/**
 	 * Given a photo object, get it and save it with all of its info
 	 */
-	private void processPhoto(final JSONObject photoPost, final Date postTimestamp, final String tags) throws Exception {
+	private void processPhoto(final JSONObject photoPost, final Date postTimestamp, final String tags, final boolean npfType) throws Exception {
 		hashHighResImagesIfNeeded();
 
 		final String caption = getAndStripCaption(photoPost);
+		LinkedList<File> downloadedFiles = new LinkedList<File>();
+		
+		if (npfType) {
+			//This is a new format post
+			String bodyHTML = (String)photoPost.get("body");
+			Document doc = Jsoup.parse(bodyHTML);
 
-		final JSONArray photos = (JSONArray) photoPost.get("photos");
-		for (final Object photo : photos) {
-			final String individualCaption = stripCaption(getStringProperty(photo, "caption"));
-			final Object originalSize = ((JSONObject) photo).get("original_size");
-			final String photoUrl = getStringProperty(originalSize, "url");
+			// Find all img tags within the HTML. These are the image URLs
+			Elements imgTags = doc.select("img");
 
-			File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+			// Extract the src values for each img tag
+			for (Element imgTag : imgTags) {
+			    String srcValue = imgTag.attr("src");
+			    //The URL in the post object usually lists a 640x960 resolution. Oftentimes, a 1280x1920 version exists, as well. We should try to get it.
+			    String higherRes = srcValue.replace("s640x960", "s1280x1920");
+
+			    //First, we want to try to download the higher res version
+			    File highResFile = downloadHighResFileByFollowingHtmlPage(higherRes, CONTENT_FOLDER );
+			    if (highResFile != null && highResFile.exists()) {
+			    	downloadedFiles.add(highResFile);
+			    } else {
+			    	//If this URL doesn't actually exist, try the lower res one that should
+			    	File downloadedFile = downloadHighResFileByFollowingHtmlPage(srcValue, CONTENT_FOLDER);
+			    	downloadedFiles.add(downloadedFile);
+			    }
+			}
+		} else {
+			//Totally different procedure for original posts
+			final JSONArray photos = (JSONArray) photoPost.get("photos");
+			for (final Object photo : photos) {
+				final Object originalSize = ((JSONObject) photo).get("original_size");
+				final String photoUrl = getStringProperty(originalSize, "url");
+
+				File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+				downloadedFiles.add(downloadedFile);
+			}
+		}
+
+//		final JSONArray photos = (JSONArray) photoPost.get("photos");
+//		for (final Object photo : photos) {
+//			final String individualCaption = stripCaption(getStringProperty(photo, "caption"));
+//			final Object originalSize = ((JSONObject) photo).get("original_size");
+//			final String photoUrl = getStringProperty(originalSize, "url");
+//
+//			File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+		for (final File downloadedFile : downloadedFiles) {
 
 			//Now that we've downloaded the image from tumblr, let's see if there's a high res copy in the originals folder
 			final FileInputStream fileInputStream = new FileInputStream(downloadedFile);
@@ -611,6 +660,7 @@ public class TumblrDownloader {
 
 			//Let's see how far we are from anything in the folder
 			boolean usingHighResImage = false;
+			File usedHighResFile = null;
 			if (minDistance <= MAX_PHASH_DISTANCE && matchingFilenames.size() == 1) {
 				//Anything over this threshold is definitely not a match and if more than 1 images matched then we won't know which to pick
 
@@ -623,7 +673,7 @@ public class TumblrDownloader {
 				}
 				usingHighResImage = true;
 
-				downloadedFile = takeOriginalFileOverDownloadedOne(downloadedFile, highResFile);
+				usedHighResFile = takeOriginalFileOverDownloadedOne(downloadedFile, highResFile);
 				_stats.highResImagesCopied++;
 
 			} else {
@@ -644,17 +694,48 @@ public class TumblrDownloader {
 				}
 			}
 
-			//Annotate the file with the caption
-			final String totalCaption = StringUtils.isBlank(individualCaption) ? caption : individualCaption;
-
-			if (getExtension(downloadedFile.getName()).equals(JPG)) {
+			File fileObj = usedHighResFile == null ? downloadedFile : usedHighResFile;
+			if (getExtension(fileObj.getName()).equals(JPG)) {
 				//Update EXIF only for JPGs. Doesn't work for PNGs.
-				updateExifForJPG(totalCaption, tags, downloadedFile, postTimestamp, usingHighResImage);
+				updateExifForJPG(caption, tags, fileObj, postTimestamp, usingHighResImage);
 			} else {
-				createInfoFile(downloadedFile, totalCaption, tags, null, postTimestamp);
+				createInfoFile(fileObj, caption, tags, null, postTimestamp);
 			}
 			_stats.imagesDownloaded++;
 		}
+	}
+
+	/**
+	 * The way this works is weird.
+	 * 
+	 * The .JPG URL goes to an HTML page that has some decoration around the image. 
+	 * The image URL is inside that page and it's SOMETIMES different than the URL of the page itself.
+	 * Sometimes it's the same, which is bizarre.
+	 * 
+	 * This method takes the URL, goes there, looks up the SRC from an IMG tag of class J9AiF
+	 * ad then downloads that image
+	 * 
+	 * @param url
+	 * @param contentFolder
+	 * @return
+	 * @throws IOException
+	 * @throws InterruptedException 
+	 */
+	private File downloadHighResFileByFollowingHtmlPage(String url, File contentFolder) throws IOException, InterruptedException {
+		// Fetch the HTML content of the page
+        Document doc = Jsoup.connect(url).get();
+
+        // Find all the <img> tags with class "J9Aif" - should be just one
+        Elements imgElements = doc.select("img.J9AiF");
+
+        // Loop through the elements and print their 'src' attribute
+        for (Element imgElement : imgElements) {
+            String srcUrl = imgElement.attr("src");
+            
+            return downloadFile(srcUrl, contentFolder);
+        }
+        
+        return null;
 	}
 
 	private File takeOriginalFileOverDownloadedOne(final File downloadedFile, final File highResFile) throws IOException {
