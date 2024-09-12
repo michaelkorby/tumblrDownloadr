@@ -1,0 +1,1 @@
+java -cp "*;lib\*;bin" TumblrDownloader > latestRun.log 2>&1
