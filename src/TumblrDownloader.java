@@ -49,12 +49,12 @@ public class TumblrDownloader {
 	
 	//System-specific path prefixes
 	//LAPTOP
-//	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorb\\My Drive";
-//	private static final String CONTENT_ROOT = "p:\\";
+	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorb\\My Drive";
+	private static final String CONTENT_ROOT = "C:\\Users\\mkorb\\Pictures";
 	
 	//LENOVO
-	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorby\\Google Drive";
-	private static final String CONTENT_ROOT = "c:\\Pictures";
+//	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorby\\Google Drive";
+//	private static final String CONTENT_ROOT = "c:\\Pictures";
 
 
 	private static final String WGET_EXE = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\wget\\wget.exe";
