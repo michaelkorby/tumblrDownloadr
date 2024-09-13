@@ -46,34 +46,25 @@ import org.jsoup.select.Elements;
  * Date: 4/12/12
  */
 public class TumblrDownloader {
-	
+	//Parameters containing paths
+	private static final String TUMBLR_PROPERTIES_SUBFOLDER = "\\Code\\TumblrDownloadr\\tumblr.properties";
+	private static final String GDRIVE_STAGING_SUBFOLDER = "\\Riley Tumblr Staging";
+	private static final String BACKUP_SUBFOLDER = "\\Baby\\Tumblr Backup";
+	private static final String WGET_SUBFOLDER = "\\Code\\TumblrDownloadr\\wget\\wget.exe";
+	private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
+
 	//System-specific path prefixes
 	//LAPTOP
-	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorb\\My Drive";
-	private static final String CONTENT_ROOT = "C:\\Users\\mkorb\\Pictures";
+//	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorb\\My Drive";
+//	private static final String CONTENT_ROOT = "C:\\Users\\mkorb\\Pictures";
 	
 	//LENOVO
 //	private static final String GOOGLE_DRIVE_ROOT = "C:\\users\\mkorby\\Google Drive";
 //	private static final String CONTENT_ROOT = "c:\\Pictures";
 
-
-	private static final String WGET_EXE = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\wget\\wget.exe";
-
 	private static final String DATA_NPF = "data-npf='";
-
 	private static final String LINK_TYPE = "link";
-
 	private static final int RETRY_ATTEMPT_COUNT = 25;
-
-	//Parameters containing paths
-	private static final String EXIF_TOOL = "c:\\exiftool\\exiftool";
-	private static final File CONTENT_FOLDER = new File(CONTENT_ROOT + "\\Baby\\Tumblr Backup");
-	private static final String HIGH_RES_IMAGE_FOLDER = GOOGLE_DRIVE_ROOT + "\\Riley Tumblr Staging";
-
-	/**
-	 * Properties file
-	 */
-	private static final String TUMBLR_PROPERTIES = GOOGLE_DRIVE_ROOT + "\\Code\\TumblrDownloadr\\tumblr.properties";
 	private static final String OATH_KEY = "oath.key";
 
 	//Tumblr settings
@@ -109,6 +100,13 @@ public class TumblrDownloader {
 	private static final SimpleDateFormat EXIF_TOOL_ALL_DATES_COMMAND_FORMAT = new SimpleDateFormat("'-AllDates='''yyyy:MM:dd HH:mm:ss''");
 	private static final String DOUBLE_ESCAPED_QUOTE_CHARACTER = "\\\\\"";
 
+	private static String _googleDriveRoot;
+	private static String _contentRoot;
+	private static String _wgetExe;
+	private static File _contentFolder;
+	private static String _highResFolder;
+	private static String _tumblrProperties;
+
 	private final HashMap<String,String> _highResImages = new HashMap<String, String>();
 	private final Statistics _stats = new Statistics();
 	private TreeMap<Date,File> _videosByDate = new TreeMap<Date, File>();
@@ -117,9 +115,9 @@ public class TumblrDownloader {
 		//Find out where we should end the download
 		final Collection<File> downloadPassFiles;
 		try {
-			downloadPassFiles = FileUtils.listFiles(CONTENT_FOLDER, new WildcardFileFilter(DOWNLOAD_PASS_PREFIX + "*." + INFO_EXTENSION), null);
+			downloadPassFiles = FileUtils.listFiles(_contentFolder, new WildcardFileFilter(DOWNLOAD_PASS_PREFIX + "*." + INFO_EXTENSION), null);
 		} catch (IllegalArgumentException ie) {
-			throw new RuntimeException("Looks like " + CONTENT_FOLDER + " is not reachable from this computer. Running on the wrong machine?", ie);
+			throw new RuntimeException("Looks like " + _contentFolder + " is not reachable from this computer. Running on the wrong machine?", ie);
 		}
 		File newestFile = null;
 		for (final File downloadPassFile : downloadPassFiles) {
@@ -132,7 +130,7 @@ public class TumblrDownloader {
 		final Properties properties = new Properties();
 		final InputStream fileInputStream;
 		try {
-			fileInputStream = new FileInputStream(TUMBLR_PROPERTIES);
+			fileInputStream = new FileInputStream(_tumblrProperties);
 		} catch (FileNotFoundException ie) {
 			throw new RuntimeException("Cannot reach the properties file on Google Drive. Maybe not connected to Google Drive?", ie);
 		}
@@ -260,7 +258,7 @@ public class TumblrDownloader {
 			//Create the info file with information about this download batch
 			//Do this after each file is processed in case the job dies mid-stream
 			final String downloadPassFilename = DOWNLOAD_PASS_FILENAME_FORMAT.format(new Date());
-			createInfoFile(CONTENT_FOLDER.getAbsolutePath() + File.separator + downloadPassFilename,
+			createInfoFile(_contentFolder.getAbsolutePath() + File.separator + downloadPassFilename,
 					postID +
 					"\nDownload and copyover completed on \n" + TUMBLR_DATE_FORMAT.format(new Date()) +
 					"\n" + _stats.toString(),
@@ -288,7 +286,7 @@ public class TumblrDownloader {
 	private void processText(final JSONObject postObj, final Date postDate, final String tags, final String bodyTagName) throws IOException {
 		final String body = stripCaption((String) postObj.get(bodyTagName));
 		final Object title = postObj.get("title");
-		final File file = new File(CONTENT_FOLDER, POST_FILENAME_FORMAT.format(postDate));
+		final File file = new File(_contentFolder, POST_FILENAME_FORMAT.format(postDate));
 		createInfoFile(file.getAbsolutePath(), body,  tags, (String)title, postDate);
 		_stats.textsDownloaded++;
 	}
@@ -364,7 +362,7 @@ public class TumblrDownloader {
 			File downloadedFile = null;
 			for (int i = 0; i <= RETRY_ATTEMPT_COUNT; i++) {
 				try {
-					downloadedFile = downloadFile(embedUrl, CONTENT_FOLDER);
+					downloadedFile = downloadFile(embedUrl, _contentFolder);
 					//Downloaded successfully
 					break;
 				} catch (final RuntimeException | InterruptedException e) {
@@ -403,7 +401,7 @@ public class TumblrDownloader {
 		} else {
 			//This is a YouTube video or something else that we can't download. Make a fake filename
 			//to create the associated info file. 
-			newFileName = new File(CONTENT_ROOT, caption+".mov");
+			newFileName = new File(_contentRoot, caption+".mov");
 			downloaded = false;
 		}
 
@@ -465,7 +463,7 @@ public class TumblrDownloader {
 	 */
 	private LinkedList<File> getVideosOrAudiofilesForDate(final Date postTimestamp, final int offset, final String[] extensions) {
 		if (_videosByDate.isEmpty()) {
-			for (final File file : getAllFilesByExtension(HIGH_RES_IMAGE_FOLDER, extensions)) {
+			for (final File file : getAllFilesByExtension(_highResFolder, extensions)) {
 				_videosByDate.put(new Date(file.lastModified()), file);
 			}
 		}
@@ -493,9 +491,9 @@ public class TumblrDownloader {
 	 */
 	private void hashHighResImagesIfNeeded() throws Exception {
 		if (_highResImages.isEmpty()) {
-			File[] allFiles = getAllFilesByExtension(HIGH_RES_IMAGE_FOLDER, JPG, PNG);
+			File[] allFiles = getAllFilesByExtension(_highResFolder, JPG, PNG);
 			if (allFiles == null) {
-				throw new RuntimeException("No high res image folder found: "+ HIGH_RES_IMAGE_FOLDER);
+				throw new RuntimeException("No high res image folder found: "+ _highResFolder);
 			}
 			for (final File file : allFiles) {
 				String compareToHash = null;
@@ -608,12 +606,12 @@ public class TumblrDownloader {
 			    String higherRes = srcValue.replace("s640x960", "s1280x1920");
 
 			    //First, we want to try to download the higher res version
-			    File highResFile = downloadHighResFileByFollowingHtmlPage(higherRes, CONTENT_FOLDER );
+			    File highResFile = downloadHighResFileByFollowingHtmlPage(higherRes, _contentFolder );
 			    if (highResFile != null && highResFile.exists()) {
 			    	downloadedFiles.add(highResFile);
 			    } else {
 			    	//If this URL doesn't actually exist, try the lower res one that should
-			    	File downloadedFile = downloadHighResFileByFollowingHtmlPage(srcValue, CONTENT_FOLDER);
+			    	File downloadedFile = downloadHighResFileByFollowingHtmlPage(srcValue, _contentFolder);
 			    	downloadedFiles.add(downloadedFile);
 			    }
 			}
@@ -624,7 +622,7 @@ public class TumblrDownloader {
 				final Object originalSize = ((JSONObject) photo).get("original_size");
 				final String photoUrl = getStringProperty(originalSize, "url");
 
-				File downloadedFile = downloadFile(photoUrl, CONTENT_FOLDER);
+				File downloadedFile = downloadFile(photoUrl, _contentFolder);
 				downloadedFiles.add(downloadedFile);
 			}
 		}
@@ -739,19 +737,19 @@ public class TumblrDownloader {
 	}
 
 	private File takeOriginalFileOverDownloadedOne(final File downloadedFile, final File highResFile) throws IOException {
-		final File movedFile = new File(CONTENT_FOLDER, highResFile.getName());
+		final File movedFile = new File(_contentFolder, highResFile.getName());
 
 		if (movedFile.canRead()) {
 			//This means that we already have a high-res file of the same name. Rename it by prepending a 1 to it.
 			final File existingFile = movedFile;
-			if (!existingFile.renameTo(new File(CONTENT_FOLDER, "1" + movedFile.getName()))) {
+			if (!existingFile.renameTo(new File(_contentFolder, "1" + movedFile.getName()))) {
 				//Unable to rename the file. We're about to clobber it if we proceed
 				throw new RuntimeException("Could not rename " + movedFile.getAbsolutePath() + " by prepending a 1 to its name. This was necessary because a new high-res file of the same name is about to be copied into the folder. Cannot continue");
 			}
 		}
 
 		//Copy the file over. Moving it as one operation doesn't always work if it can't delete the original file. Copying first and deleting the file afterwards appears to work.
-		FileUtils.copyFileToDirectory(highResFile, CONTENT_FOLDER);
+		FileUtils.copyFileToDirectory(highResFile, _contentFolder);
 
 		//Check to see that the copyover worked
 		if (!movedFile.canRead()) {
@@ -869,7 +867,7 @@ public class TumblrDownloader {
 		//and the image URL returns an HTML page with a bunch of mark-up around the image. The URL for the image itself is the same. If we use Java's URL class to download it
 		//we always get the HTML page now instead of the image. Wget seems to work around that (some flags in the request maybe?) and gets just the image itself. This issue only
 		//affects images and not videos but this method takes care of both.
-		final ProcessBuilder pb = new ProcessBuilder(WGET_EXE,fileURL);
+		final ProcessBuilder pb = new ProcessBuilder(_wgetExe,fileURL);
 		pb.directory(folder); 
 
 		// redirecting error stream 
@@ -939,7 +937,19 @@ public class TumblrDownloader {
 
 	public static void main(final String... args) {
 		try {
-			new TumblrDownloader();
+			if (args.length != 2) {
+				System.err.println("Usage: TumblrDownloader <Google Drive Root> <Tumblr Archive Root>");
+				System.err.println("Google Drive Root: e.g. C:\\users\\mkorb\\My Drive\\");
+				System.err.println("Tumblr Archive Root: e.g. C:\\Users\\mkorb\\Pictures");
+			} else {
+				_googleDriveRoot = args[0];
+				_contentRoot = args[1];
+				_wgetExe = _googleDriveRoot + WGET_SUBFOLDER;
+				_contentFolder = new File(_contentRoot + BACKUP_SUBFOLDER);
+				_highResFolder = _googleDriveRoot + GDRIVE_STAGING_SUBFOLDER;
+				_tumblrProperties = _googleDriveRoot + TUMBLR_PROPERTIES_SUBFOLDER;
+				new TumblrDownloader();
+			}
 		} catch (final Throwable ie) {
 			ie.printStackTrace();
 		}

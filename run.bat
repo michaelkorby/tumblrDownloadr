@@ -1,1 +1,1 @@
-java -cp "*;lib\*;bin" TumblrDownloader > latestRun.log 2>&1
+java -cp "*;lib\*;bin" TumblrDownloader "C:\users\mkorb\My Drive" "C:\users\mkorb\Pictures" > latestRun.log 2>&1
